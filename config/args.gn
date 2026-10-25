@@ -1,0 +1,28 @@
+# GN build arguments for Archie. Copied to out/Archie/args.gn by scripts/build.sh.
+# See `gn args out/Archie --list` for everything available.
+
+# Release build.
+is_debug = false
+is_official_build = true
+symbol_level = 0
+blink_symbol_level = 0
+dcheck_always_on = false
+chrome_pgo_phase = 0
+
+# No Google account or API integration: Archie works fully offline from
+# Google services, and there are no API keys to leak or nag about.
+use_official_google_api_keys = false
+google_api_key = ""
+google_default_client_id = ""
+google_default_client_secret = ""
+
+# Unbranded Chromium build; product strings come from scripts/rebrand.py.
+is_chrome_branded = false
+enable_reporting = false
+enable_remoting = false
+enable_hangout_services_extension = false
+
+# Media: play the common web formats.
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
+enable_widevine = true

@@ -1,0 +1,29 @@
+Archie: never ask the user to sign in.
+
+Default both "signin.allowed" and "signin.allowed_on_next_startup" to
+false. This removes the avatar-menu sign-in prompts, sync promos and the
+sign-in step of profile creation. Sign-in stays available as an opt-in
+under Settings > You and Google.
+
+--- a/components/signin/internal/identity_manager/primary_account_manager.cc
++++ b/components/signin/internal/identity_manager/primary_account_manager.cc
+@@ -391,7 +391,7 @@
+       prefs::kGoogleServicesSyncingUsernameMigratedToSignedIn, std::string());
+   registry->RegisterIntegerPref(prefs::kGoogleServicesSyncingUserMigrationType,
+                                 /*SyncToSigninMigrationType::kUnknown=*/0);
+-  registry->RegisterBooleanPref(prefs::kSigninAllowed, true);
++  registry->RegisterBooleanPref(prefs::kSigninAllowed, false);
+   registry->RegisterBooleanPref(prefs::kSignedInWithCredentialProvider, false);
+   registry->RegisterBooleanPref(prefs::kExplicitBrowserSignin, false);
+   registry->RegisterBooleanPref(
+--- a/chrome/browser/signin/account_consistency_mode_manager.cc
++++ b/chrome/browser/signin/account_consistency_mode_manager.cc
+@@ -146,7 +146,7 @@
+ // static
+ void AccountConsistencyModeManager::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+-  registry->RegisterBooleanPref(prefs::kSigninAllowedOnNextStartup, true);
++  registry->RegisterBooleanPref(prefs::kSigninAllowedOnNextStartup, false);
+ }
+ 
+ // static

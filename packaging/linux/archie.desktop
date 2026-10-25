@@ -1,0 +1,21 @@
+[Desktop Entry]
+Version=1.0
+Name=Archie
+GenericName=Web Browser
+Comment=A minimal browser with an Arc-style tab sidebar
+Exec=archie %U
+Terminal=false
+Icon=archie
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=archie
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=archie
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec=archie --incognito

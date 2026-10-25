@@ -1,0 +1,18 @@
+Archie: never open the "What's New" tab after an update.
+
+--- a/chrome/browser/ui/startup/startup_tab_provider.cc
++++ b/chrome/browser/ui/startup/startup_tab_provider.cc
+@@ -278,11 +278,8 @@
+ // static
+ StartupTabs StartupTabProviderImpl::GetNewFeaturesTabsForState(
+     bool whats_new_enabled) {
+-  StartupTabs tabs;
+-  if (whats_new_enabled) {
+-    tabs.emplace_back(whats_new::GetWebUIStartupURL());
+-  }
+-  return tabs;
++  // Archie: no "What's New" page on startup.
++  return StartupTabs();
+ }
+ 
+ #endif

@@ -1,0 +1,17 @@
+Archie: open the last profile directly instead of the profile picker.
+
+Profiles are Archie's "spaces"; switching happens from the avatar menu,
+so don't interrupt startup with "Who's using Archie?". The picker can
+still be re-enabled from its own "Show on startup" checkbox.
+
+--- a/chrome/browser/profiles/profiles_state.cc
++++ b/chrome/browser/profiles/profiles_state.cc
+@@ -84,7 +84,7 @@
+   registry->RegisterBooleanPref(prefs::kBrowserAddPersonEnabled, true);
+   registry->RegisterBooleanPref(prefs::kForceBrowserSignin, false);
+   registry->RegisterBooleanPref(prefs::kBrowserShowProfilePickerOnStartup,
+-                                true);
++                                false);
+   registry->RegisterIntegerPref(
+       prefs::kBrowserProfilePickerAvailabilityOnStartup,
+       static_cast<int>(ProfilePicker::AvailabilityOnStartup::kEnabled));

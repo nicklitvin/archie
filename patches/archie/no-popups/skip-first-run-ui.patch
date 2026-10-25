@@ -1,0 +1,40 @@
+Archie: skip the first-run intro and promotional tabs.
+
+Never open the first-run "Make it yours" / sign-in intro, and default
+the PromotionsEnabled local-state pref to false so no promotional or
+educational full-tab content is shown.
+
+--- a/chrome/browser/ui/startup/first_run_service.cc
++++ b/chrome/browser/ui/startup/first_run_service.cc
+@@ -32,18 +32,9 @@
+ #include "content/public/browser/browser_context.h"
+ 
+ namespace {
++// Archie: there is no first-run intro, so no profile is ever eligible.
+ bool IsFirstRunEligibleProfile(Profile* profile) {
+-  if (profile->IsOffTheRecord()) {
+-    return false;
+-  }
+-
+-  // The parent guest and the profiles in a ChromeOS Guest session get through
+-  // the OTR check above.
+-  if (profile->IsGuestSession()) {
+-    return false;
+-  }
+-
+-  return true;
++  return false;
+ }
+ 
+ bool IsFirstRunEligibleProcess() {
+--- a/chrome/browser/ui/startup/startup_browser_creator.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator.cc
+@@ -971,7 +971,7 @@
+ // static
+ void StartupBrowserCreator::RegisterLocalStatePrefs(
+     PrefRegistrySimple* registry) {
+-  registry->RegisterBooleanPref(prefs::kPromotionsEnabled, true);
++  registry->RegisterBooleanPref(prefs::kPromotionsEnabled, false);
+ #if !BUILDFLAG(IS_CHROMEOS)
+   registry->RegisterBooleanPref(prefs::kCommandLineFlagSecurityWarningsEnabled,
+                                 true);

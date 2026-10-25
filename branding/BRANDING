@@ -1,0 +1,10 @@
+COMPANY_FULLNAME=The Archie Authors
+COMPANY_SHORTNAME=The Archie Authors
+PRODUCT_FULLNAME=Archie
+PRODUCT_SHORTNAME=Archie
+PRODUCT_INSTALLER_FULLNAME=Archie Installer
+PRODUCT_INSTALLER_SHORTNAME=Archie Installer
+COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Archie Authors and The Chromium Authors. All rights reserved.
+MAC_BUNDLE_ID=org.archie.Archie
+MAC_CREATOR_CODE=Arch
+MAC_TEAM_ID=

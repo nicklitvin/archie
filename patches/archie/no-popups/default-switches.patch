@@ -1,0 +1,48 @@
+Archie: turn off in-product help, default-browser and search-choice
+prompts for the whole browser.
+
+Appends switches to the browser process command line at startup:
+  --propagate-iph-for-testing   with an empty allowlist this blocks every
+                                in-product-help bubble ("Try this new
+                                feature" callouts, tutorials, etc.).
+  --no-default-browser-check
+  --disable-search-engine-choice-screen
+A switch the user passed explicitly always wins.
+
+--- a/chrome/app/chrome_main.cc
++++ b/chrome/app/chrome_main.cc
+@@ -67,6 +67,25 @@
+   static base::NoDestructor<std::optional<base::CommandLine>>
+       initial_command_line;
+   return *initial_command_line;
++}
++
++// Archie: browser-wide defaults that remove onboarding and help popups. Each
++// switch is only added when the user has not passed it already.
++void AppendArchieDefaultSwitches(base::CommandLine* command_line) {
++  if (command_line->HasSwitch(switches::kProcessType)) {
++    return;
++  }
++  // An empty value means "no in-product-help feature is allowed to show".
++  static constexpr const char* kArchieSwitches[] = {
++      "propagate-iph-for-testing",
++      "no-default-browser-check",
++      "disable-search-engine-choice-screen",
++  };
++  for (const char* archie_switch : kArchieSwitches) {
++    if (!command_line->HasSwitch(archie_switch)) {
++      command_line->AppendSwitch(archie_switch);
++    }
++  }
+ }
+ 
+ }  // namespace
+@@ -187,6 +206,8 @@
+   AppendExtraArgumentsToCommandLine(command_line);
+ #endif
+ 
++  AppendArchieDefaultSwitches(command_line);
++
+   // PoissonAllocationSampler's TLS slots need to be set up before
+   // MainThreadStackSamplingProfiler (in ChromeMainDelegate::ThreadPoolCreated),
+   // which can allocate TLS slots of its own. On some platforms pthreads can

@@ -1,0 +1,41 @@
+Archie: drop the nag infobars shown at startup.
+
+Removes the "Google API keys are missing" infobar (Archie ships without
+Google API keys on purpose) and the default-browser / pin-to-taskbar /
+PDF-handler prompts. The crash-restore bubble and security warnings for
+dangerous command-line flags are kept.
+
+--- a/chrome/browser/ui/startup/infobar_utils.cc
++++ b/chrome/browser/ui/startup/infobar_utils.cc
+@@ -253,20 +253,6 @@
+   infobars::ContentInfoBarManager* infobar_manager =
+       infobars::ContentInfoBarManager::FromWebContents(web_contents);
+ 
+-  if (!google_apis::HasAPIKeyConfigured()) {
+-    if (infobars::IsInfoBarMigrated(
+-            infobars::InfoBarDelegate::GOOGLE_API_KEYS_INFOBAR_DELEGATE)) {
+-      if (auto* manager =
+-              infobars::BrowserInfoBarManager::From(g_browser_process)) {
+-        manager->Show(
+-            tabs::TabInterface::GetFromContents(web_contents),
+-            infobars::InfoBarDelegate::GOOGLE_API_KEYS_INFOBAR_DELEGATE);
+-      }
+-    } else {
+-      GoogleApiKeysInfoBarDelegate::Create(infobar_manager);
+-    }
+-  }
+-
+   if (ObsoleteSystem::IsObsoleteNowOrSoon()) {
+     PrefService* local_state = g_browser_process->local_state();
+     if (!local_state ||
+@@ -303,7 +289,9 @@
+   }
+ #endif
+ 
+-#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
++// Archie: never prompt to become the default browser, pin to the taskbar or
++// handle PDFs.
++#if 0
+   if (is_web_app ||
+       startup_command_line.HasSwitch(switches::kNoDefaultBrowserCheck) ||
+       startup_command_line.HasSwitch(switches::kNoFirstRun)) {

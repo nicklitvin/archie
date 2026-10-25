@@ -1,0 +1,18 @@
+Archie: create profiles locally without a sign-in step.
+
+The profile picker offers "Sign in" as the first step of adding a
+profile unless the BrowserSignin policy disables it. Treat "no policy"
+as disabled so "Add profile" goes straight to naming and theming a
+local profile. An explicit BrowserSignin policy is still honoured.
+
+--- a/chrome/browser/ui/webui/signin/profile_picker_ui.cc
++++ b/chrome/browser/ui/webui/signin/profile_picker_ui.cc
+@@ -72,7 +72,7 @@
+       policy::key::kBrowserSignin, base::Value::Type::INTEGER);
+ 
+   if (!browser_signin_value) {
+-    return true;
++    return false;
+   }
+ 
+   return static_cast<policy::BrowserSigninMode>(

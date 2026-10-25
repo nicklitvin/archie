@@ -1,0 +1,18 @@
+# Applied in order by scripts/prepare.sh. Paths are relative to this file.
+
+# Tabs live in an Arc-style sidebar on the left.
+archie/ui/vertical-tabs-by-default.patch
+archie/ui/no-profile-picker-on-startup.patch
+
+# No login, ever required.
+archie/no-signin/signin-off-by-default.patch
+archie/no-signin/local-profiles-in-picker.patch
+
+# No onboarding, promos or help popups.
+archie/no-popups/skip-first-run-ui.patch
+archie/no-popups/no-whats-new-tab.patch
+archie/no-popups/no-startup-infobars.patch
+archie/no-popups/default-switches.patch
+
+# Branding.
+archie/branding/user-data-dir.patch
