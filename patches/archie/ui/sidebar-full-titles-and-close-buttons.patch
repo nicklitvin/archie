@@ -1,0 +1,87 @@
+Archie: show full tab titles and a close button on every sidebar tab.
+
+In the vertical tab strip, stock Chromium fades long titles out at the
+sidebar edge and only shows the close (x) button on the active or
+hovered tab. Instead:
+  - long titles wrap onto extra lines (up to 6) and the tab grows to fit;
+  - every unpinned tab shows its close button whenever the sidebar is
+    wide enough, not just on hover.
+Collapsed (icon-only) sidebars, pinned tabs and split tabs keep the
+stock single-line layout, and titles only wrap once the sidebar has
+finished expanding so tabs don't jump around mid-animation.
+
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -14,12 +14,17 @@
+ #include "chrome/browser/ui/views/tabs/tab/tab_icon.h"
+ #include "chrome/browser/ui/views/tabs/tab/tab_title.h"
+ #include "chrome/browser/ui/views/tabs/tab_style_views.h"
++#include "ui/gfx/text_constants.h"
+ 
+ namespace {
+ constexpr int kIconDesignWidth = 16;
+ constexpr int kTitleMinWidth = 10;
+ constexpr int kHorizontalInset = 8;
+ constexpr int kDefaultPadding = 4;
++// Archie: long titles wrap instead of fading out. Six lines fits every
++// realistic page title at the default sidebar width; anything longer ends in
++// an ellipsis.
++constexpr size_t kMaxTitleLines = 6;
+ }  // namespace
+ 
+ TabViewVerticalLayout::TabViewVerticalLayout() = default;
+@@ -42,6 +47,14 @@
+       TabChildConfig(TabView().title_, kTitleMinWidth, kDefaultPadding,
+                      /*align_leading=*/true,
+                      /*expand=*/true)};
++
++  // Archie: let the title wrap. Top alignment keeps the first line in place
++  // when the layout gives the label less than its full height (e.g. while the
++  // sidebar is animating open), and the rest is clipped.
++  TabView().title_->SetElideBehavior(gfx::ELIDE_TAIL);
++  TabView().title_->SetMultiLine(true);
++  TabView().title_->SetMaxLines(kMaxTitleLines);
++  TabView().title_->SetVerticalAlignment(gfx::ALIGN_TOP);
+ }
+ 
+ views::ProposedLayout TabViewVerticalLayout::CalculateProposedLayout(
+@@ -94,9 +107,28 @@
+     }
+   }
+ 
++  // Archie: grow the tab to fit a wrapped title. The icon, alert indicator
++  // and close button stay aligned with the first line.
++  const bool can_wrap_title =
++      !is_centered && !TabView().collapsed_ && !TabView().split_;
++  views::ChildLayout* title_layout =
++      can_wrap_title ? layouts.GetLayoutFor(TabView().title_.get()) : nullptr;
++  if (title_layout && title_layout->visible &&
++      title_layout->bounds.width() > 0) {
++    const int extra_height =
++        TabView().title_->GetHeightForWidth(title_layout->bounds.width()) -
++        title_layout->bounds.height();
++    if (extra_height > 0) {
++      title_layout->bounds.set_height(title_layout->bounds.height() +
++                                      extra_height);
++      layouts.host_size.Enlarge(0, extra_height);
++    }
++  }
++
+   if (TabView().glic_tab_underline_view_) {
+     const gfx::Rect glic_bounds =
+-        gfx::Rect(0, 0, 2 * glic::TabUnderlineView::kEffectThickness, height);
++        gfx::Rect(0, 0, 2 * glic::TabUnderlineView::kEffectThickness,
++                  layouts.host_size.height());
+     layouts.child_layouts.emplace_back(
+         TabView().glic_tab_underline_view_.get(),
+         TabView().glic_tab_underline_view_->GetVisible(), glic_bounds);
+@@ -184,7 +216,8 @@
+       return TabView().active_ && hovered_or_focused;
+     }
+ 
+-    return TabView().active_ || hovered_or_focused;
++    // Archie: every tab gets a close button once there is room for it.
++    return true;
+   }
+ 
+   NOTREACHED() << "Unknown tab child view";

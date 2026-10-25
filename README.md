@@ -13,7 +13,7 @@ moving to a new Chromium release cheap.
 
 | | How |
 |---|---|
-| **Tab sidebar on the left** | Chromium's native vertical tab strip, turned on by default. Pinned tabs, tab groups, drag to reorder, collapse to icons. |
+| **Tab sidebar on the left** | Chromium's native vertical tab strip, turned on by default. Long titles wrap onto extra lines instead of being cut off, and every tab has an ✕ close button (not just the one you hover). Pinned tabs, tab groups, drag to reorder, collapse to icons. |
 | **Tab groups** | Native tab groups, shown as folders in the sidebar (right-click a tab > *Add tab to group*). |
 | **Profiles** | Native Chromium profiles, created locally with no sign-in step. Switch between them from the avatar menu. Each profile has its own tabs, bookmarks, history and cookies, like Arc's Spaces. |
 | **Bookmarks** | Native bookmarks: ★ in the address bar, `Ctrl+Shift+O` for the manager, and the bookmarks side panel. The bookmarks bar is off by default to keep things clean (`Ctrl+Shift+B` toggles it). |
@@ -49,7 +49,8 @@ scripts/preview.sh /path/to/chrome # or point it at a binary
 ```
 
 This is only a preview of the defaults. A real Archie build also removes
-popups that need a source change.
+popups that need a source change, and has the full-title / always-visible ✕
+sidebar tabs.
 
 ## Build
 
