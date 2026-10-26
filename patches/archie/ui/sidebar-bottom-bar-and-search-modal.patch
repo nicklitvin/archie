@@ -1,20 +1,23 @@
-Archie: navigation buttons and a search box in the sidebar.
+Archie: a sticky bottom section and a search box in the sidebar.
 
-  - Back, Forward and Reload buttons sit at the bottom of the vertical tab
-    strip, next to the new tab button. Back/Forward/Reload dim when they
-    can't be used.
-  - The sidebar's new tab button opens a floating search box
-    (ArchieCommandBar) instead of a blank tab. Enter opens what you typed
-    in a new tab: an address is opened directly, anything else is searched
-    with the default search engine, using the omnibox's own classifier.
-    Esc or clicking elsewhere closes it without opening a tab.
-    Middle-click (paste and go) and the button's context menu still work.
+The bottom of the vertical tab strip stays pinned to the bottom of the
+sidebar and holds, from top to bottom:
+  - a pill showing the previously active tab (click to switch back) and a
+    button that scrolls the tab list to the active tab;
+  - Back, Forward and Reload buttons (dimmed when unavailable) and the new
+    tab button.
+The new tab button opens a floating search box (ArchieCommandBar) instead
+of a blank tab. It shows address-bar style suggestions while you type,
+from the omnibox's own autocomplete engine (history, bookmarks, open tabs,
+search suggestions). Up/Down pick one, Enter or a click opens it in a new
+tab, Esc or clicking elsewhere closes the box. Middle-click (paste and go)
+and the new tab button's context menu still work.
 
 diff --git a/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,86 @@
 +// Copyright 2026 The Archie Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -23,10 +26,15 @@ new file mode 100644
 +#define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_ARCHIE_COMMAND_BAR_H_
 +
 +#include <memory>
++#include <string>
 +#include <string_view>
++#include <vector>
 +
 +#include "base/memory/raw_ptr.h"
 +#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "components/omnibox/browser/autocomplete_controller.h"
++#include "components/omnibox/browser/autocomplete_match.h"
 +#include "ui/views/controls/textfield/textfield_controller.h"
 +#include "ui/views/widget/widget.h"
 +
@@ -34,15 +42,18 @@ new file mode 100644
 +
 +namespace views {
 +class BubbleDialogDelegate;
++class LabelButton;
 +class Textfield;
 +class View;
 +}  // namespace views
 +
 +// Archie: the floating search box shown by the sidebar's new tab button.
-+// Typing an address opens it; anything else is searched with the default
-+// search engine. Enter opens the result in a new tab, Esc or clicking
-+// elsewhere closes the box without opening a tab.
-+class ArchieCommandBar : public views::TextfieldController {
++// It suggests addresses, history, bookmarks and searches as you type, using
++// the same autocomplete engine as the address bar. Up/Down pick a suggestion,
++// Enter or a click opens it in a new tab, and Esc or clicking elsewhere
++// closes the box without opening a tab.
++class ArchieCommandBar : public views::TextfieldController,
++                         public AutocompleteController::Observer {
 + public:
 +  explicit ArchieCommandBar(BrowserWindowInterface* browser);
 +  ArchieCommandBar(const ArchieCommandBar&) = delete;
@@ -54,11 +65,22 @@ new file mode 100644
 +  void Show(views::View* anchor);
 +
 +  // views::TextfieldController:
++  void ContentsChanged(views::Textfield* sender,
++                       const std::u16string& new_contents) override;
 +  bool HandleKeyEvent(views::Textfield* sender,
 +                      const ui::KeyEvent& key_event) override;
 +
++  // AutocompleteController::Observer:
++  void OnResultChanged(AutocompleteController* controller,
++                       bool default_match_changed) override;
++
 + private:
-+  void OpenInNewTab(std::u16string_view input);
++  void RebuildSuggestionRows();
++  void SelectRow(int row);
++  void OnRowPressed(size_t row);
++  void OpenMatch(const AutocompleteMatch& match);
++  // Used when Enter is pressed before any suggestion has arrived.
++  void OpenTypedText(std::u16string_view input);
 +  void OnWidgetClosed(views::Widget::ClosedReason reason);
 +
 +  const raw_ptr<BrowserWindowInterface> browser_;
@@ -67,6 +89,16 @@ new file mode 100644
 +  std::unique_ptr<views::BubbleDialogDelegate> delegate_;
 +  std::unique_ptr<views::Widget> widget_;
 +  raw_ptr<views::Textfield> textfield_ = nullptr;
++  raw_ptr<views::View> suggestion_list_ = nullptr;
++  std::vector<raw_ptr<views::LabelButton>> suggestion_rows_;
++
++  std::unique_ptr<AutocompleteController> autocomplete_controller_;
++  base::ScopedObservation<AutocompleteController,
++                          AutocompleteController::Observer>
++      autocomplete_observation_{this};
++  // The suggestions currently shown, in row order.
++  std::vector<AutocompleteMatch> matches_;
++  int selected_row_ = -1;
 +
 +  base::WeakPtrFactory<ArchieCommandBar> weak_factory_{this};
 +};
@@ -76,14 +108,14 @@ diff --git a/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc b/chrom
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,298 @@
 +// Copyright 2026 The Archie Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/ui/views/tabs/vertical/archie_command_bar.h"
 +
-+#include <string>
++#include <algorithm>
 +#include <utility>
 +
 +#include "base/functional/bind.h"
@@ -91,28 +123,49 @@ new file mode 100644
 +#include "base/strings/string_util.h"
 +#include "base/task/sequenced_task_runner.h"
 +#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
++#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
++#include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
 +#include "chrome/browser/ui/navigator/browser_navigator.h"
 +#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 +#include "components/omnibox/browser/autocomplete_classifier.h"
-+#include "components/omnibox/browser/autocomplete_match.h"
++#include "components/omnibox/browser/autocomplete_controller_config.h"
++#include "components/omnibox/browser/autocomplete_enums.h"
++#include "components/omnibox/browser/autocomplete_input.h"
++#include "components/omnibox/browser/autocomplete_result.h"
++#include "components/vector_icons/vector_icons.h"
 +#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "ui/base/models/image_model.h"
 +#include "ui/base/mojom/dialog_button.mojom.h"
 +#include "ui/base/window_open_disposition.h"
++#include "ui/color/color_id.h"
 +#include "ui/events/event.h"
 +#include "ui/events/keycodes/keyboard_codes.h"
 +#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/text_constants.h"
 +#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
 +#include "ui/views/bubble/bubble_border.h"
 +#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/button/label_button.h"
 +#include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/layout/box_layout_view.h"
 +
 +namespace {
 +
 +constexpr char16_t kPlaceholder[] = u"Search or type a URL";
++constexpr char16_t kSeparator[] = u" — ";  // em dash
 +constexpr int kFontSizeDelta = 4;
 +constexpr int kWidthInChars = 40;
++constexpr size_t kMaxRows = 6;
++constexpr int kRowIconSize = 16;
++constexpr int kRowCornerRadius = 8;
++constexpr int kListTopSpacing = 8;
++const gfx::Insets kRowInsets = gfx::Insets::VH(6, 8);
 +
 +}  // namespace
 +
@@ -132,11 +185,24 @@ new file mode 100644
 +    return;
 +  }
 +
++  Profile* profile = browser_->GetProfile();
++  autocomplete_controller_ = std::make_unique<AutocompleteController>(
++      std::make_unique<ChromeAutocompleteProviderClient>(profile),
++      AutocompleteControllerConfig{
++          .provider_types = AutocompleteClassifier::DefaultOmniboxProviders(),
++          .show_iph_matches = false});
++  autocomplete_observation_.Observe(autocomplete_controller_.get());
++
 +  delegate_ = std::make_unique<views::BubbleDialogDelegate>(
 +      anchor, views::BubbleBorder::FLOAT);
 +  delegate_->SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
 +  delegate_->SetShowTitle(false);
 +  delegate_->SetShowCloseButton(false);
++
++  auto contents = std::make_unique<views::BoxLayoutView>();
++  contents->SetOrientation(views::BoxLayout::Orientation::kVertical);
++  contents->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
 +
 +  auto textfield = std::make_unique<views::Textfield>();
 +  textfield->SetController(this);
@@ -146,7 +212,18 @@ new file mode 100644
 +      views::Textfield::GetDefaultFontList().DeriveWithSizeDelta(
 +          kFontSizeDelta));
 +  textfield->SetDefaultWidthInChars(kWidthInChars);
-+  textfield_ = delegate_->SetContentsView(std::move(textfield));
++  textfield_ = contents->AddChildView(std::move(textfield));
++
++  auto suggestion_list = std::make_unique<views::BoxLayoutView>();
++  suggestion_list->SetOrientation(views::BoxLayout::Orientation::kVertical);
++  suggestion_list->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
++  suggestion_list->SetInsideBorderInsets(
++      gfx::Insets::TLBR(kListTopSpacing, 0, 0, 0));
++  suggestion_list->SetVisible(false);
++  suggestion_list_ = contents->AddChildView(std::move(suggestion_list));
++
++  delegate_->SetContentsView(std::move(contents));
 +  delegate_->SetInitiallyFocusedView(textfield_);
 +
 +  widget_ = views::BubbleDialogDelegate::CreateBubble(
@@ -155,59 +232,180 @@ new file mode 100644
 +  widget_->Show();
 +}
 +
-+bool ArchieCommandBar::HandleKeyEvent(views::Textfield* sender,
-+                                      const ui::KeyEvent& key_event) {
-+  if (key_event.type() != ui::EventType::kKeyPressed ||
-+      key_event.key_code() != ui::VKEY_RETURN) {
-+    return false;
++void ArchieCommandBar::ContentsChanged(views::Textfield* sender,
++                                       const std::u16string& new_contents) {
++  if (!autocomplete_controller_) {
++    return;
 +  }
-+  OpenInNewTab(sender->GetText());
-+  return true;
++  if (base::TrimWhitespace(new_contents, base::TRIM_ALL).empty()) {
++    autocomplete_controller_->Stop(AutocompleteStopReason::kClobbered);
++    matches_.clear();
++    RebuildSuggestionRows();
++    return;
++  }
++
++  Profile* profile = browser_->GetProfile();
++  AutocompleteInput input(new_contents, metrics::OmniboxEventProto::OTHER,
++                          ChromeAutocompleteSchemeClassifier(profile));
++  // Suggestions are listed below the box; never rewrite what was typed.
++  input.set_prevent_inline_autocomplete(true);
++  autocomplete_controller_->Start(input);
 +}
 +
-+void ArchieCommandBar::OpenInNewTab(std::u16string_view input) {
++bool ArchieCommandBar::HandleKeyEvent(views::Textfield* sender,
++                                      const ui::KeyEvent& key_event) {
++  if (key_event.type() != ui::EventType::kKeyPressed) {
++    return false;
++  }
++  switch (key_event.key_code()) {
++    case ui::VKEY_DOWN:
++      SelectRow(selected_row_ + 1);
++      return true;
++    case ui::VKEY_UP:
++      SelectRow(selected_row_ - 1);
++      return true;
++    case ui::VKEY_RETURN:
++      if (selected_row_ >= 0 &&
++          static_cast<size_t>(selected_row_) < matches_.size()) {
++        OpenMatch(matches_[selected_row_]);
++      } else {
++        OpenTypedText(sender->GetText());
++      }
++      return true;
++    default:
++      return false;
++  }
++}
++
++void ArchieCommandBar::OnResultChanged(AutocompleteController* controller,
++                                       bool default_match_changed) {
++  matches_.clear();
++  for (const AutocompleteMatch& match : controller->result()) {
++    if (matches_.size() == kMaxRows) {
++      break;
++    }
++    if (match.destination_url.is_valid()) {
++      matches_.push_back(match);
++    }
++  }
++  RebuildSuggestionRows();
++}
++
++void ArchieCommandBar::RebuildSuggestionRows() {
++  if (!suggestion_list_) {
++    return;
++  }
++  suggestion_rows_.clear();
++  suggestion_list_->RemoveAllChildViews();
++
++  for (size_t i = 0; i < matches_.size(); ++i) {
++    const AutocompleteMatch& match = matches_[i];
++    std::u16string text = match.contents;
++    if (!match.description.empty()) {
++      text += kSeparator;
++      text += match.description;
++    }
++    auto row = std::make_unique<views::LabelButton>(
++        base::BindRepeating(&ArchieCommandBar::OnRowPressed,
++                            weak_factory_.GetWeakPtr(), i),
++        text);
++    row->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(AutocompleteMatch::IsSearchType(match.type)
++                                           ? vector_icons::kSearchIcon
++                                           : vector_icons::kGlobeIcon,
++                                       ui::kColorIcon, kRowIconSize));
++    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    row->SetElideBehavior(gfx::ELIDE_TAIL);
++    row->SetTooltipText(text);
++    row->SetBorder(views::CreateEmptyBorder(kRowInsets));
++    suggestion_rows_.push_back(suggestion_list_->AddChildView(std::move(row)));
++  }
++
++  suggestion_list_->SetVisible(!matches_.empty());
++  selected_row_ = -1;
++  SelectRow(0);
++  delegate_->SizeToContents();
++}
++
++void ArchieCommandBar::SelectRow(int row) {
++  if (suggestion_rows_.empty()) {
++    selected_row_ = -1;
++    return;
++  }
++  row = std::clamp(row, 0, static_cast<int>(suggestion_rows_.size()) - 1);
++  if (selected_row_ >= 0 &&
++      static_cast<size_t>(selected_row_) < suggestion_rows_.size()) {
++    suggestion_rows_[selected_row_]->SetBackground(nullptr);
++  }
++  selected_row_ = row;
++  suggestion_rows_[selected_row_]->SetBackground(
++      views::CreateRoundedRectBackground(kColorTabBackgroundInactiveHoverFrameActive,
++                                         kRowCornerRadius));
++}
++
++void ArchieCommandBar::OnRowPressed(size_t row) {
++  if (row < matches_.size()) {
++    OpenMatch(matches_[row]);
++  }
++}
++
++void ArchieCommandBar::OpenMatch(const AutocompleteMatch& match) {
++  // Copy what is needed first: navigating can update `matches_`.
++  const GURL url = match.destination_url;
++  const ui::PageTransition transition = match.transition;
++  NavigateParams params(browser_.get(), url, transition);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  Navigate(&params);
++
++  // Closes asynchronously, so it is safe while handling a key or click. The
++  // new tab may already have closed it by taking activation.
++  if (widget_) {
++    widget_->Close();
++  }
++}
++
++void ArchieCommandBar::OpenTypedText(std::u16string_view input) {
 +  const std::u16string text(base::TrimWhitespace(input, base::TRIM_ALL));
 +  if (text.empty()) {
 +    return;
 +  }
-+
 +  // Let the omnibox decide whether this is an address or a search, exactly as
 +  // if it had been typed into the location bar.
 +  AutocompleteMatch match;
 +  AutocompleteClassifierFactory::GetForProfile(browser_->GetProfile())
 +      ->Classify(text, /*in_keyword_mode=*/false,
 +                 /*allow_exact_keyword_match=*/false,
-+                 metrics::OmniboxEventProto::INVALID_SPEC, &match,
++                 metrics::OmniboxEventProto::OTHER, &match,
 +                 /*alternate_nav_url=*/nullptr);
-+  if (!match.destination_url.is_valid()) {
-+    return;
-+  }
-+
-+  NavigateParams params(browser_.get(), match.destination_url,
-+                        match.transition);
-+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-+  Navigate(&params);
-+
-+  // Closes asynchronously, so it is safe while handling the textfield's event.
-+  // The new tab may already have closed it by taking activation.
-+  if (widget_) {
-+    widget_->Close();
++  if (match.destination_url.is_valid()) {
++    OpenMatch(match);
 +  }
 +}
 +
 +void ArchieCommandBar::OnWidgetClosed(views::Widget::ClosedReason reason) {
++  autocomplete_observation_.Reset();
++  if (autocomplete_controller_) {
++    autocomplete_controller_->Stop(AutocompleteStopReason::kClobbered);
++  }
++  matches_.clear();
++  suggestion_rows_.clear();
++  suggestion_list_ = nullptr;
 +  if (textfield_) {
 +    textfield_->SetController(nullptr);
 +    textfield_ = nullptr;
 +  }
 +  // The widget may still be unwinding, and the delegate must outlive it, so
-+  // destroy both later, widget first.
++  // destroy both later, widget first. The autocomplete controller can go
++  // with them.
 +  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](std::unique_ptr<views::BubbleDialogDelegate> delegate,
++          [](std::unique_ptr<AutocompleteController> controller,
++             std::unique_ptr<views::BubbleDialogDelegate> delegate,
 +             std::unique_ptr<views::Widget> widget) { widget.reset(); },
-+          std::move(delegate_), std::move(widget_)));
++          std::move(autocomplete_controller_), std::move(delegate_),
++          std::move(widget_)));
 +}
 --- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
 +++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
@@ -227,13 +425,14 @@ new file mode 100644
      "top_container_button.cc",
      "vertical_tab_strip_bottom_container.cc",
      "vertical_tab_strip_expand_on_hover_lock.cc",
-@@ -46,6 +48,12 @@
+@@ -46,6 +48,13 @@
  
    deps = [
      "//chrome/browser:primitives",
 +    "//chrome/browser/autocomplete",
 +    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/ui/navigator",
++    "//components/favicon/content",
 +    "//components/omnibox/browser",
 +    "//components/vector_icons",
 +    "//third_party/metrics_proto",
@@ -329,7 +528,7 @@ new file mode 100644
    command_updater_->UpdateCommandEnabled(IDC_RELOAD_CLEARING_CACHE, can_reload);
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h
-@@ -5,11 +5,15 @@
+@@ -5,11 +5,17 @@
  #ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
  #define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
  
@@ -337,6 +536,8 @@ new file mode 100644
 +
  #include "base/callback_list.h"
  #include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "components/tabs/public/tab_interface.h"
 +#include "ui/actions/action_id.h"
  #include "ui/base/metadata/metadata_header_macros.h"
  #include "ui/views/layout/flex_layout_view.h"
@@ -345,7 +546,7 @@ new file mode 100644
  class BrowserWindowInterface;
  class ExpandOnHoverLock;
  class TabStripFlatEdgeButton;
-@@ -18,12 +22,22 @@
+@@ -18,13 +24,30 @@
  class ActionItem;
  }  // namespace actions
  
@@ -355,6 +556,7 @@ new file mode 100644
 +
 +namespace views {
 +class ActionViewController;
++class LabelButton;
 +}  // namespace views
 +
  namespace tabs {
@@ -363,62 +565,118 @@ new file mode 100644
  }  // namespace tabs
  
  // Bottom container of the vertical tab strip which includes the new tab button.
-+// Archie adds Back, Forward and Reload buttons, and makes the new tab button
-+// open a search box.
- class VerticalTabStripBottomContainer : public views::FlexLayoutView {
+-class VerticalTabStripBottomContainer : public views::FlexLayoutView {
++//
++// Archie: the container fills the space below the tabs and keeps its contents
++// pinned to the bottom of the sidebar. From top to bottom it holds
++//   - a row with a pill for the previously active tab (click to go back to
++//     it) and a button that scrolls the tab list to the active tab;
++//   - a row with Back, Forward and Reload buttons and the new tab button,
++//     which opens a search box (ArchieCommandBar) instead of a blank tab.
++class VerticalTabStripBottomContainer : public views::FlexLayoutView,
++                                        public TabStripModelObserver {
    METADATA_HEADER(VerticalTabStripBottomContainer, views::FlexLayoutView)
   public:
-@@ -44,6 +58,12 @@
+   VerticalTabStripBottomContainer(
+@@ -38,19 +61,44 @@
+ 
+   void OnCollapseStateChanged(tabs::VerticalTabStripCollapseState state);
+ 
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
+  private:
+   void OnNewTabButtonContextMenuWillShow();
+   void OnNewTabButtonContextMenuClosed();
  
    void UpdateButtonStyles(bool collapsed);
  
-+  // Archie: adds a button bound to the browser action `action_id`.
++  // Adds a button to the button row bound to the browser action `action_id`.
 +  void AddNavigationButton(actions::ActionId action_id,
 +                           const gfx::VectorIcon& icon,
 +                           int tooltip_id);
 +  void ShowCommandBar();
++  void ActivatePreviousTab();
++  void ScrollToActiveTab();
++  void UpdatePreviousTabPill();
 +
    raw_ptr<BrowserWindowInterface> browser_ = nullptr;
    raw_ptr<actions::ActionItem> root_action_item_ = nullptr;
++  raw_ptr<views::FlexLayoutView> tab_row_ = nullptr;
++  raw_ptr<views::LabelButton> previous_tab_pill_ = nullptr;
++  raw_ptr<views::FlexLayoutView> button_row_ = nullptr;
    raw_ptr<TabStripFlatEdgeButton> new_tab_button_ = nullptr;
-@@ -51,6 +71,9 @@
+   base::CallbackListSubscription collapsed_state_change_subscription_;
    base::CallbackListSubscription new_tab_button_pressed_subscription_;
  
    std::unique_ptr<ExpandOnHoverLock> expand_on_hover_lock_;
 +
 +  std::unique_ptr<views::ActionViewController> action_view_controller_;
 +  std::unique_ptr<ArchieCommandBar> command_bar_;
++  // The tab that was active before the current one.
++  tabs::TabHandle previous_tab_;
  };
  
  #endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
-@@ -5,6 +5,7 @@
+@@ -4,26 +4,117 @@
+ 
  #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
  
++#include <string>
++
  #include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/ui/actions/chrome_action_id.h"
  #include "chrome/browser/ui/browser_element_identifiers.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
  #include "chrome/browser/ui/layout_constants.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
-@@ -12,8 +13,16 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
  #include "chrome/browser/ui/views/tabs/shared/new_tab_button.h"
  #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
 +#include "chrome/browser/ui/views/tabs/vertical/archie_command_bar.h"
 +#include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
 +#include "chrome/grit/generated_resources.h"
++#include "components/favicon/content/content_favicon_driver.h"
 +#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
  #include "ui/actions/actions.h"
 +#include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
 +#include "ui/base/models/image_model.h"
 +#include "ui/color/color_id.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/text_constants.h"
++#include "ui/views/accessibility/view_accessibility.h"
 +#include "ui/views/actions/action_view_controller.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++#include "ui/views/controls/button/label_button.h"
  #include "ui/views/view_class_properties.h"
++#include "ui/views/view_utils.h"
++
++namespace {
++
++constexpr char16_t kScrollToActiveTabTooltip[] = u"Scroll to current tab";
++constexpr int kPillCornerRadius = 8;
++constexpr int kPillIconSize = 16;
++constexpr int kRowSpacing = 4;
++const gfx::Insets kPillInsets = gfx::Insets::VH(6, 10);
++
++}  // namespace
  
  VerticalTabStripBottomContainer::VerticalTabStripBottomContainer(
-@@ -21,9 +30,21 @@
+     tabs::VerticalTabStripStateController* state_controller,
      actions::ActionItem* root_action_item,
      BrowserWindowInterface* browser,
      base::RepeatingClosure record_new_tab_button_pressed)
@@ -430,8 +688,53 @@ new file mode 100644
    SetProperty(views::kElementIdentifierKey,
                kVerticalTabStripBottomContainerElementId);
 +
-+  // Archie: Back, Forward and Reload sit at the bottom of the sidebar, before
-+  // the new tab button.
++  // Archie: this container stretches to fill the space under the tabs; keep
++  // its rows pinned to the bottom of the sidebar.
++  SetOrientation(views::LayoutOrientation::kVertical);
++  SetMainAxisAlignment(views::LayoutAlignment::kEnd);
++  SetCrossAxisAlignment(views::LayoutAlignment::kStretch);
++
++  // Row 1: the previous tab pill and the scroll-to-current-tab button.
++  tab_row_ = AddChildView(std::make_unique<views::FlexLayoutView>());
++  tab_row_->SetOrientation(views::LayoutOrientation::kHorizontal);
++  // Keeps the scroll button on the right when there is no previous tab.
++  tab_row_->SetMainAxisAlignment(views::LayoutAlignment::kEnd);
++  tab_row_->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
++  tab_row_->SetProperty(views::kMarginsKey,
++                        gfx::Insets::TLBR(0, 0, kRowSpacing, 0));
++
++  auto pill = std::make_unique<views::LabelButton>(
++      base::BindRepeating(&VerticalTabStripBottomContainer::ActivatePreviousTab,
++                          base::Unretained(this)));
++  pill->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  pill->SetElideBehavior(gfx::ELIDE_TAIL);
++  pill->SetBorder(views::CreateEmptyBorder(kPillInsets));
++  pill->SetBackground(views::CreateRoundedRectBackground(
++      kColorTabBackgroundActiveFrameActive, kPillCornerRadius));
++  pill->SetProperty(
++      views::kFlexBehaviorKey,
++      views::FlexSpecification(views::LayoutOrientation::kHorizontal,
++                               views::MinimumFlexSizeRule::kScaleToZero,
++                               views::MaximumFlexSizeRule::kUnbounded));
++  pill->SetProperty(views::kMarginsKey,
++                    gfx::Insets::TLBR(0, 0, 0, kRowSpacing));
++  pill->SetVisible(false);
++  previous_tab_pill_ = tab_row_->AddChildView(std::move(pill));
++
++  auto scroll_button = std::make_unique<TopContainerButton>();
++  scroll_button->SetCallback(
++      base::BindRepeating(&VerticalTabStripBottomContainer::ScrollToActiveTab,
++                          base::Unretained(this)));
++  scroll_button->UpdateIcon(ui::ImageModel::FromVectorIcon(
++      vector_icons::kLocationOnIcon, ui::kColorIcon));
++  scroll_button->SetTooltipText(kScrollToActiveTabTooltip);
++  scroll_button->GetViewAccessibility().SetName(
++      std::u16string(kScrollToActiveTabTooltip));
++  tab_row_->AddChildView(std::move(scroll_button));
++
++  // Row 2: Back, Forward, Reload and the new tab button.
++  button_row_ = AddChildView(std::make_unique<views::FlexLayoutView>());
++
 +  AddNavigationButton(kActionBack, vector_icons::kArrowBackIcon,
 +                      IDS_TOOLTIP_BACK);
 +  AddNavigationButton(kActionForward, vector_icons::kArrowForwardIcon,
@@ -441,20 +744,104 @@ new file mode 100644
  
    auto new_tab_button = std::make_unique<shared::NewTabButton>(
        browser_,
-@@ -39,6 +60,11 @@
-   new_tab_button_pressed_subscription_ =
+@@ -40,28 +131,40 @@
        new_tab_button->RegisterWillInvokeActionCallback(
            record_new_tab_button_pressed);
-+
-+  // Archie: ask what to open instead of opening a blank tab.
+ 
+-  new_tab_button_ = AddChildView(std::move(new_tab_button));
++  // Ask what to open instead of opening a blank tab.
 +  new_tab_button->SetClickOverride(
 +      base::BindRepeating(&VerticalTabStripBottomContainer::ShowCommandBar,
 +                          base::Unretained(this)));
++
++  new_tab_button_ = button_row_->AddChildView(std::move(new_tab_button));
  
-   new_tab_button_ = AddChildView(std::move(new_tab_button));
+   OnCollapseStateChanged(state_controller->GetCollapseState());
+   collapsed_state_change_subscription_ =
+       state_controller->RegisterOnCollapseChanged(base::BindRepeating(
+           &VerticalTabStripBottomContainer::OnCollapseStateChanged,
+           base::Unretained(this)));
++
++  browser_->GetTabStripModel()->AddObserver(this);
+ }
  
-@@ -86,6 +112,35 @@
-   expand_on_hover_lock_.reset();
+ VerticalTabStripBottomContainer::~VerticalTabStripBottomContainer() = default;
+-
+ 
+ bool VerticalTabStripBottomContainer::IsPositionInWindowCaption(
+     const gfx::Point& point) {
+-  for (views::View* child : children()) {
+-    if (!child->GetVisible()) {
++  // The rows fill the width, so look at the buttons inside them.
++  for (views::View* row : children()) {
++    if (!row->GetVisible()) {
+       continue;
+     }
+-    gfx::Point point_in_child = point;
+-    views::View::ConvertPointToTarget(this, child, &point_in_child);
+-    if (child->HitTestPoint(point_in_child)) {
+-      return false;
++    for (views::View* child : row->children()) {
++      if (!child->GetVisible()) {
++        continue;
++      }
++      gfx::Point point_in_child = point;
++      views::View::ConvertPointToTarget(this, child, &point_in_child);
++      if (child->HitTestPoint(point_in_child)) {
++        return false;
++      }
+     }
+   }
+   return true;
+@@ -72,6 +175,28 @@
+   // Updating the styles immediately at start of the animation by including
+   // collapsing state.
+   UpdateButtonStyles(state != tabs::VerticalTabStripCollapseState::kExpanded);
++}
++
++void VerticalTabStripBottomContainer::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  // Remember the tab we just left, unless it is the one being closed.
++  if (selection.active_tab_changed() && selection.old_tab &&
++      selection.old_tab != selection.new_tab &&
++      tab_strip_model->GetIndexOfTab(selection.old_tab) !=
++          TabStripModel::kNoTab) {
++    previous_tab_ = selection.old_tab->GetHandle();
++  }
++  UpdatePreviousTabPill();
++}
++
++void VerticalTabStripBottomContainer::OnTabChangedAt(
++    tabs::TabInterface* tab,
++    TabChangeType change_type) {
++  if (tab == previous_tab_.Get()) {
++    UpdatePreviousTabPill();
++  }
+ }
+ 
+ void VerticalTabStripBottomContainer::OnNewTabButtonContextMenuWillShow() {
+@@ -90,10 +215,14 @@
+   auto orientation = collapsed ? views::LayoutOrientation::kVertical
+                                : views::LayoutOrientation::kHorizontal;
+ 
++  // A collapsed sidebar is too narrow for the previous tab pill.
++  tab_row_->SetVisible(!collapsed);
++
+   // Setting button's layout based on collapsed state
+-  SetOrientation(orientation);
+-  SetCrossAxisAlignment(collapsed ? views::LayoutAlignment::kStretch
+-                                  : views::LayoutAlignment::kStart);
++  button_row_->SetOrientation(orientation);
++  button_row_->SetCrossAxisAlignment(collapsed
++                                         ? views::LayoutAlignment::kStretch
++                                         : views::LayoutAlignment::kCenter);
+ 
+   new_tab_button_->SetProperty(
+       views::kFlexBehaviorKey,
+@@ -108,5 +237,92 @@
+                 : LayoutInset::VERTICAL_TAB_STRIP_BOTTOM_BUTTON_UNCOLLAPSED));
  }
  
 +void VerticalTabStripBottomContainer::AddNavigationButton(
@@ -474,7 +861,7 @@ new file mode 100644
 +  auto button = std::make_unique<TopContainerButton>();
 +  action_view_controller_->CreateActionViewRelationship(
 +      button.get(), action_item->GetAsWeakPtr());
-+  AddChildView(std::move(button));
++  button_row_->AddChildView(std::move(button));
 +}
 +
 +void VerticalTabStripBottomContainer::ShowCommandBar() {
@@ -486,15 +873,63 @@ new file mode 100644
 +  command_bar_->Show(browser_view->contents_container());
 +}
 +
- void VerticalTabStripBottomContainer::UpdateButtonStyles(bool collapsed) {
-   auto orientation = collapsed ? views::LayoutOrientation::kVertical
-                                : views::LayoutOrientation::kHorizontal;
-@@ -93,7 +148,7 @@
-   // Setting button's layout based on collapsed state
-   SetOrientation(orientation);
-   SetCrossAxisAlignment(collapsed ? views::LayoutAlignment::kStretch
--                                  : views::LayoutAlignment::kStart);
-+                                  : views::LayoutAlignment::kCenter);
- 
-   new_tab_button_->SetProperty(
-       views::kFlexBehaviorKey,
++void VerticalTabStripBottomContainer::ActivatePreviousTab() {
++  tabs::TabInterface* tab = previous_tab_.Get();
++  if (!tab) {
++    return;
++  }
++  TabStripModel* tab_strip_model = browser_->GetTabStripModel();
++  const int index = tab_strip_model->GetIndexOfTab(tab);
++  if (index != TabStripModel::kNoTab) {
++    tab_strip_model->ActivateTabAt(index);
++  }
++}
++
++void VerticalTabStripBottomContainer::ScrollToActiveTab() {
++  tabs::TabInterface* active_tab = browser_->GetTabStripModel()->GetActiveTab();
++  if (!active_tab) {
++    return;
++  }
++  for (views::View* view = parent(); view; view = view->parent()) {
++    if (auto* region = views::AsViewClass<VerticalTabStripRegionView>(view)) {
++      if (views::View* tab_view =
++              region->GetTabAnchorView(active_tab->GetHandle())) {
++        tab_view->ScrollViewToVisible();
++      }
++      return;
++    }
++  }
++}
++
++void VerticalTabStripBottomContainer::UpdatePreviousTabPill() {
++  TabStripModel* tab_strip_model = browser_->GetTabStripModel();
++  tabs::TabInterface* tab = previous_tab_.Get();
++  const bool show = tab && tab != tab_strip_model->GetActiveTab() &&
++                    tab_strip_model->GetIndexOfTab(tab) !=
++                        TabStripModel::kNoTab &&
++                    tab->GetContents();
++  previous_tab_pill_->SetVisible(show);
++  if (!show) {
++    return;
++  }
++
++  content::WebContents* contents = tab->GetContents();
++  std::u16string title = contents->GetTitle();
++  if (title.empty()) {
++    title = base::UTF8ToUTF16(contents->GetVisibleURL().spec());
++  }
++  previous_tab_pill_->SetText(title);
++  previous_tab_pill_->SetTooltipText(title);
++
++  favicon::ContentFaviconDriver* favicon_driver =
++      favicon::ContentFaviconDriver::FromWebContents(contents);
++  previous_tab_pill_->SetImageModel(
++      views::Button::STATE_NORMAL,
++      favicon_driver && favicon_driver->FaviconIsValid()
++          ? ui::ImageModel::FromImage(favicon_driver->GetFavicon())
++          : ui::ImageModel::FromVectorIcon(vector_icons::kGlobeIcon,
++                                           ui::kColorIcon, kPillIconSize));
++}
++
+ BEGIN_METADATA(VerticalTabStripBottomContainer)
+ END_METADATA

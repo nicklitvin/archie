@@ -14,8 +14,8 @@ moving to a new Chromium release cheap.
 | | How |
 |---|---|
 | **Tab sidebar on the left** | Chromium's native vertical tab strip, turned on by default. Tab titles are never abbreviated: they wrap onto as many lines as they need. Every tab has an ✕ close button (not just the one you hover). Pinned tabs, tab groups, drag to reorder, collapse to icons. |
-| **Sidebar controls** | Back, Forward and Reload buttons sit at the bottom of the sidebar next to **+**. They dim when they can't be used. |
-| **Search box for new tabs** | **+** opens a floating search box. Type an address or a search and press Enter to open it in a new tab. Esc or clicking elsewhere closes it without opening a tab. Middle-click on **+** still pastes and goes. |
+| **Sidebar bottom section** | Pinned to the bottom of the sidebar. It has a pill for the tab you were on before (click to jump back), a button that scrolls the tab list to your current tab, and Back, Forward, Reload and **+** buttons. Back/Forward/Reload dim when they can't be used. |
+| **Search box for new tabs** | **+** opens a floating search box with address-bar suggestions as you type (history, bookmarks, open tabs, search suggestions). Use ↑/↓ to pick one, Enter or click to open it in a new tab, and Esc or clicking elsewhere to close it without opening a tab. Middle-click on **+** still pastes and goes. |
 | **Tab groups** | Native tab groups, shown as folders in the sidebar (right-click a tab > *Add tab to group*). |
 | **Profiles** | Native Chromium profiles, created locally with no sign-in step. Switch between them from the avatar menu. Each profile has its own tabs, bookmarks, history and cookies, like Arc's Spaces. |
 | **Bookmarks** | Native bookmarks: ★ in the address bar, `Ctrl+Shift+O` for the manager, and the bookmarks side panel. The bookmarks bar is off by default to keep things clean (`Ctrl+Shift+B` toggles it). |
@@ -52,7 +52,7 @@ scripts/preview.sh /path/to/chrome # or point it at a binary
 
 This is only a preview of the defaults. A real Archie build also removes
 popups that need a source change, and has the sidebar changes (full titles,
-✕ on every tab, bottom buttons and the search box).
+✕ on every tab, the bottom section and the search box).
 
 ## Build
 
