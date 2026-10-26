@@ -3,7 +3,8 @@ Archie: show full tab titles and a close button on every sidebar tab.
 In the vertical tab strip, stock Chromium fades long titles out at the
 sidebar edge and only shows the close (x) button on the active or
 hovered tab. Instead:
-  - long titles wrap onto extra lines (up to 6) and the tab grows to fit;
+  - titles are never abbreviated: they wrap onto as many lines as they
+    need (breaking inside long words such as URLs) and the tab grows;
   - every unpinned tab shows its close button whenever the sidebar is
     wide enough, not just on hover.
 Collapsed (icon-only) sidebars, pinned tabs and split tabs keep the
@@ -12,7 +13,7 @@ finished expanding so tabs don't jump around mid-animation.
 
 --- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
-@@ -14,12 +14,17 @@
+@@ -14,6 +14,7 @@
  #include "chrome/browser/ui/views/tabs/tab/tab_icon.h"
  #include "chrome/browser/ui/views/tabs/tab/tab_title.h"
  #include "chrome/browser/ui/views/tabs/tab_style_views.h"
@@ -20,32 +21,25 @@ finished expanding so tabs don't jump around mid-animation.
  
  namespace {
  constexpr int kIconDesignWidth = 16;
- constexpr int kTitleMinWidth = 10;
- constexpr int kHorizontalInset = 8;
- constexpr int kDefaultPadding = 4;
-+// Archie: long titles wrap instead of fading out. Six lines fits every
-+// realistic page title at the default sidebar width; anything longer ends in
-+// an ellipsis.
-+constexpr size_t kMaxTitleLines = 6;
- }  // namespace
- 
- TabViewVerticalLayout::TabViewVerticalLayout() = default;
-@@ -42,6 +47,14 @@
+@@ -42,6 +43,17 @@
        TabChildConfig(TabView().title_, kTitleMinWidth, kDefaultPadding,
                       /*align_leading=*/true,
                       /*expand=*/true)};
 +
-+  // Archie: let the title wrap. Top alignment keeps the first line in place
-+  // when the layout gives the label less than its full height (e.g. while the
-+  // sidebar is animating open), and the rest is clipped.
-+  TabView().title_->SetElideBehavior(gfx::ELIDE_TAIL);
++  // Archie: never abbreviate titles. They wrap onto as many lines as needed,
++  // breaking inside words that are too long for one line (e.g. URLs). Top
++  // alignment keeps the first line in place when the layout gives the label
++  // less than its full height (e.g. while the sidebar is animating open), and
++  // the rest is clipped.
++  TabView().title_->SetElideBehavior(gfx::NO_ELIDE);
 +  TabView().title_->SetMultiLine(true);
-+  TabView().title_->SetMaxLines(kMaxTitleLines);
++  TabView().title_->SetMaxLines(0);
++  TabView().title_->SetAllowCharacterBreak(true);
 +  TabView().title_->SetVerticalAlignment(gfx::ALIGN_TOP);
  }
  
  views::ProposedLayout TabViewVerticalLayout::CalculateProposedLayout(
-@@ -94,9 +107,28 @@
+@@ -94,9 +106,28 @@
      }
    }
  
@@ -75,7 +69,7 @@ finished expanding so tabs don't jump around mid-animation.
      layouts.child_layouts.emplace_back(
          TabView().glic_tab_underline_view_.get(),
          TabView().glic_tab_underline_view_->GetVisible(), glic_bounds);
-@@ -184,7 +216,8 @@
+@@ -184,7 +215,8 @@
        return TabView().active_ && hovered_or_focused;
      }
  

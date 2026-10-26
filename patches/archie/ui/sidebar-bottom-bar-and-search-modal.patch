@@ -1,0 +1,500 @@
+Archie: navigation buttons and a search box in the sidebar.
+
+  - Back, Forward and Reload buttons sit at the bottom of the vertical tab
+    strip, next to the new tab button. Back/Forward/Reload dim when they
+    can't be used.
+  - The sidebar's new tab button opens a floating search box
+    (ArchieCommandBar) instead of a blank tab. Enter opens what you typed
+    in a new tab: an address is opened directly, anything else is searched
+    with the default search engine, using the omnibox's own classifier.
+    Esc or clicking elsewhere closes it without opening a tab.
+    Middle-click (paste and go) and the button's context menu still work.
+
+diff --git a/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The Archie Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_ARCHIE_COMMAND_BAR_H_
++#define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_ARCHIE_COMMAND_BAR_H_
++
++#include <memory>
++#include <string_view>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
++#include "ui/views/widget/widget.h"
++
++class BrowserWindowInterface;
++
++namespace views {
++class BubbleDialogDelegate;
++class Textfield;
++class View;
++}  // namespace views
++
++// Archie: the floating search box shown by the sidebar's new tab button.
++// Typing an address opens it; anything else is searched with the default
++// search engine. Enter opens the result in a new tab, Esc or clicking
++// elsewhere closes the box without opening a tab.
++class ArchieCommandBar : public views::TextfieldController {
++ public:
++  explicit ArchieCommandBar(BrowserWindowInterface* browser);
++  ArchieCommandBar(const ArchieCommandBar&) = delete;
++  ArchieCommandBar& operator=(const ArchieCommandBar&) = delete;
++  ~ArchieCommandBar() override;
++
++  // Shows the search box centred over `anchor`, or refocuses it if it is
++  // already open.
++  void Show(views::View* anchor);
++
++  // views::TextfieldController:
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& key_event) override;
++
++ private:
++  void OpenInNewTab(std::u16string_view input);
++  void OnWidgetClosed(views::Widget::ClosedReason reason);
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++
++  // The delegate must outlive `widget_`, so it is declared first.
++  std::unique_ptr<views::BubbleDialogDelegate> delegate_;
++  std::unique_ptr<views::Widget> widget_;
++  raw_ptr<views::Textfield> textfield_ = nullptr;
++
++  base::WeakPtrFactory<ArchieCommandBar> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_ARCHIE_COMMAND_BAR_H_
+diff --git a/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc
+@@ -0,0 +1,132 @@
++// Copyright 2026 The Archie Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/tabs/vertical/archie_command_bar.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/strings/string_util.h"
++#include "base/task/sequenced_task_runner.h"
++#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "components/omnibox/browser/autocomplete_classifier.h"
++#include "components/omnibox/browser/autocomplete_match.h"
++#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/events/event.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/font_list.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/bubble/bubble_border.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/textfield/textfield.h"
++
++namespace {
++
++constexpr char16_t kPlaceholder[] = u"Search or type a URL";
++constexpr int kFontSizeDelta = 4;
++constexpr int kWidthInChars = 40;
++
++}  // namespace
++
++ArchieCommandBar::ArchieCommandBar(BrowserWindowInterface* browser)
++    : browser_(browser) {}
++
++ArchieCommandBar::~ArchieCommandBar() {
++  if (widget_) {
++    widget_->CloseNow();
++  }
++}
++
++void ArchieCommandBar::Show(views::View* anchor) {
++  if (widget_) {
++    widget_->Activate();
++    textfield_->RequestFocus();
++    return;
++  }
++
++  delegate_ = std::make_unique<views::BubbleDialogDelegate>(
++      anchor, views::BubbleBorder::FLOAT);
++  delegate_->SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++  delegate_->SetShowTitle(false);
++  delegate_->SetShowCloseButton(false);
++
++  auto textfield = std::make_unique<views::Textfield>();
++  textfield->SetController(this);
++  textfield->SetPlaceholderText(kPlaceholder);
++  textfield->GetViewAccessibility().SetName(std::u16string(kPlaceholder));
++  textfield->SetFontList(
++      views::Textfield::GetDefaultFontList().DeriveWithSizeDelta(
++          kFontSizeDelta));
++  textfield->SetDefaultWidthInChars(kWidthInChars);
++  textfield_ = delegate_->SetContentsView(std::move(textfield));
++  delegate_->SetInitiallyFocusedView(textfield_);
++
++  widget_ = views::BubbleDialogDelegate::CreateBubble(
++      delegate_.get(), base::BindOnce(&ArchieCommandBar::OnWidgetClosed,
++                                      weak_factory_.GetWeakPtr()));
++  widget_->Show();
++}
++
++bool ArchieCommandBar::HandleKeyEvent(views::Textfield* sender,
++                                      const ui::KeyEvent& key_event) {
++  if (key_event.type() != ui::EventType::kKeyPressed ||
++      key_event.key_code() != ui::VKEY_RETURN) {
++    return false;
++  }
++  OpenInNewTab(sender->GetText());
++  return true;
++}
++
++void ArchieCommandBar::OpenInNewTab(std::u16string_view input) {
++  const std::u16string text(base::TrimWhitespace(input, base::TRIM_ALL));
++  if (text.empty()) {
++    return;
++  }
++
++  // Let the omnibox decide whether this is an address or a search, exactly as
++  // if it had been typed into the location bar.
++  AutocompleteMatch match;
++  AutocompleteClassifierFactory::GetForProfile(browser_->GetProfile())
++      ->Classify(text, /*in_keyword_mode=*/false,
++                 /*allow_exact_keyword_match=*/false,
++                 metrics::OmniboxEventProto::INVALID_SPEC, &match,
++                 /*alternate_nav_url=*/nullptr);
++  if (!match.destination_url.is_valid()) {
++    return;
++  }
++
++  NavigateParams params(browser_.get(), match.destination_url,
++                        match.transition);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  Navigate(&params);
++
++  // Closes asynchronously, so it is safe while handling the textfield's event.
++  // The new tab may already have closed it by taking activation.
++  if (widget_) {
++    widget_->Close();
++  }
++}
++
++void ArchieCommandBar::OnWidgetClosed(views::Widget::ClosedReason reason) {
++  if (textfield_) {
++    textfield_->SetController(nullptr);
++    textfield_ = nullptr;
++  }
++  // The widget may still be unwinding, and the delegate must outlive it, so
++  // destroy both later, widget first.
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](std::unique_ptr<views::BubbleDialogDelegate> delegate,
++             std::unique_ptr<views::Widget> widget) { widget.reset(); },
++          std::move(delegate_), std::move(widget_)));
++}
+--- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
++++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+@@ -7,6 +7,7 @@
+ 
+ source_set("vertical") {
+   sources = [
++    "archie_command_bar.h",
+     "top_container_button.h",
+     "vertical_tab_strip_bottom_container.h",
+     "vertical_tab_strip_expand_on_hover_lock.h",
+@@ -36,6 +37,7 @@
+ 
+ source_set("impl") {
+   sources = [
++    "archie_command_bar.cc",
+     "top_container_button.cc",
+     "vertical_tab_strip_bottom_container.cc",
+     "vertical_tab_strip_expand_on_hover_lock.cc",
+@@ -46,6 +48,12 @@
+ 
+   deps = [
+     "//chrome/browser:primitives",
++    "//chrome/browser/autocomplete",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/ui/navigator",
++    "//components/omnibox/browser",
++    "//components/vector_icons",
++    "//third_party/metrics_proto",
+     "//chrome/browser/glic",
+     "//chrome/browser/glic/browser_ui:glow",
+     "//chrome/browser/glic/browser_ui:glow_controller",
+--- a/chrome/browser/ui/views/tabs/shared/new_tab_button.h
++++ b/chrome/browser/ui/views/tabs/shared/new_tab_button.h
+@@ -39,6 +39,9 @@
+   void SetOnContextMenuClosedCallback(base::RepeatingClosure callback);
+   void SetMiddleClickCallbackForTesting(base::RepeatingClosure callback);
+ 
++  // Archie: when set, a left click runs `callback` instead of opening a tab.
++  void SetClickOverride(base::RepeatingClosure callback);
++
+   // views::ContextMenuController:
+   void ShowContextMenuForViewImpl(
+       views::View* source,
+@@ -59,6 +62,7 @@
+   base::RepeatingClosure on_context_menu_will_show_callback_;
+   base::RepeatingClosure on_context_menu_closed_callback_;
+   base::RepeatingClosure middle_click_callback_for_testing_;
++  base::RepeatingClosure click_override_;
+ 
+   raw_ptr<BrowserWindowInterface> browser_;
+ };
+--- a/chrome/browser/ui/views/tabs/shared/new_tab_button.cc
++++ b/chrome/browser/ui/views/tabs/shared/new_tab_button.cc
+@@ -115,6 +115,10 @@
+   middle_click_callback_for_testing_ = std::move(callback);
+ }
+ 
++void NewTabButton::SetClickOverride(base::RepeatingClosure callback) {
++  click_override_ = std::move(callback);
++}
++
+ void NewTabButton::NotifyClick(const ui::Event& event) {
+ #if BUILDFLAG(IS_LINUX)
+   if (event.IsMouseEvent()) {
+@@ -132,6 +136,13 @@
+     }
+   }
+ #endif
++  if (click_override_) {
++    views::InkDrop::Get(this)->AnimateToState(
++        views::InkDropState::ACTION_TRIGGERED,
++        ui::LocatedEvent::FromIfValid(&event));
++    click_override_.Run();
++    return;
++  }
+   TabStripFlatEdgeButton::NotifyClick(event);
+ }
+ 
+--- a/chrome/browser/ui/views/tabs/vertical/top_container_button.cc
++++ b/chrome/browser/ui/views/tabs/vertical/top_container_button.cc
+@@ -8,6 +8,7 @@
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
+ #include "ui/compositor/layer.h"
+ #include "ui/views/actions/action_view_interface.h"
+ #include "ui/views/widget/widget.h"
+@@ -64,7 +65,12 @@
+   SetImageModel(views::Button::STATE_NORMAL, image_model);
+   SetImageModel(views::Button::STATE_HOVERED, image_model);
+   SetImageModel(views::Button::STATE_PRESSED, image_model);
+-  SetImageModel(views::Button::STATE_DISABLED, image_model);
++  // Archie: dim disabled buttons, e.g. Back when there is no history.
++  SetImageModel(
++      views::Button::STATE_DISABLED,
++      ui::ImageModel::FromVectorIcon(
++          *icon_image.GetVectorIcon().vector_icon(), ui::kColorIconDisabled,
++          GetLayoutConstant(LayoutConstant::kVerticalTabStripButtonIconSize)));
+ }
+ 
+ void TopContainerButton::SetDelayIconUpdates(bool delay) {
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -2166,10 +2166,10 @@
+   // Navigation commands
+   UpdateCommandAndActionEnabled(IDC_BACK, kActionBack,
+                                 ShouldEnableBackButton(browser_));
+-  command_updater_->UpdateCommandEnabled(IDC_FORWARD,
+-                                         ShouldEnableForwardButton(browser_));
++  UpdateCommandAndActionEnabled(IDC_FORWARD, kActionForward,
++                                ShouldEnableForwardButton(browser_));
+   const bool can_reload = CanReload(browser_);
+-  command_updater_->UpdateCommandEnabled(IDC_RELOAD, can_reload);
++  UpdateCommandAndActionEnabled(IDC_RELOAD, kActionReload, can_reload);
+   command_updater_->UpdateCommandEnabled(IDC_RELOAD_BYPASSING_CACHE,
+                                          can_reload);
+   command_updater_->UpdateCommandEnabled(IDC_RELOAD_CLEARING_CACHE, can_reload);
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h
+@@ -5,11 +5,15 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
+ #define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
+ 
++#include <memory>
++
+ #include "base/callback_list.h"
+ #include "base/memory/raw_ptr.h"
++#include "ui/actions/action_id.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/views/layout/flex_layout_view.h"
+ 
++class ArchieCommandBar;
+ class BrowserWindowInterface;
+ class ExpandOnHoverLock;
+ class TabStripFlatEdgeButton;
+@@ -18,12 +22,22 @@
+ class ActionItem;
+ }  // namespace actions
+ 
++namespace gfx {
++struct VectorIcon;
++}  // namespace gfx
++
++namespace views {
++class ActionViewController;
++}  // namespace views
++
+ namespace tabs {
+ class VerticalTabStripStateController;
+ enum class VerticalTabStripCollapseState;
+ }  // namespace tabs
+ 
+ // Bottom container of the vertical tab strip which includes the new tab button.
++// Archie adds Back, Forward and Reload buttons, and makes the new tab button
++// open a search box.
+ class VerticalTabStripBottomContainer : public views::FlexLayoutView {
+   METADATA_HEADER(VerticalTabStripBottomContainer, views::FlexLayoutView)
+  public:
+@@ -44,6 +58,12 @@
+ 
+   void UpdateButtonStyles(bool collapsed);
+ 
++  // Archie: adds a button bound to the browser action `action_id`.
++  void AddNavigationButton(actions::ActionId action_id,
++                           const gfx::VectorIcon& icon,
++                           int tooltip_id);
++  void ShowCommandBar();
++
+   raw_ptr<BrowserWindowInterface> browser_ = nullptr;
+   raw_ptr<actions::ActionItem> root_action_item_ = nullptr;
+   raw_ptr<TabStripFlatEdgeButton> new_tab_button_ = nullptr;
+@@ -51,6 +71,9 @@
+   base::CallbackListSubscription new_tab_button_pressed_subscription_;
+ 
+   std::unique_ptr<ExpandOnHoverLock> expand_on_hover_lock_;
++
++  std::unique_ptr<views::ActionViewController> action_view_controller_;
++  std::unique_ptr<ArchieCommandBar> command_bar_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
+ 
+ #include "base/functional/bind.h"
++#include "chrome/browser/ui/actions/chrome_action_id.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
+@@ -12,8 +13,16 @@
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/new_tab_button.h"
+ #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
++#include "chrome/browser/ui/views/tabs/vertical/archie_command_bar.h"
++#include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
++#include "chrome/grit/generated_resources.h"
++#include "components/vector_icons/vector_icons.h"
+ #include "ui/actions/actions.h"
++#include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
++#include "ui/views/actions/action_view_controller.h"
+ #include "ui/views/view_class_properties.h"
+ 
+ VerticalTabStripBottomContainer::VerticalTabStripBottomContainer(
+@@ -21,9 +30,21 @@
+     actions::ActionItem* root_action_item,
+     BrowserWindowInterface* browser,
+     base::RepeatingClosure record_new_tab_button_pressed)
+-    : browser_(browser), root_action_item_(root_action_item) {
++    : browser_(browser),
++      root_action_item_(root_action_item),
++      action_view_controller_(
++          std::make_unique<views::ActionViewController>()) {
+   SetProperty(views::kElementIdentifierKey,
+               kVerticalTabStripBottomContainerElementId);
++
++  // Archie: Back, Forward and Reload sit at the bottom of the sidebar, before
++  // the new tab button.
++  AddNavigationButton(kActionBack, vector_icons::kArrowBackIcon,
++                      IDS_TOOLTIP_BACK);
++  AddNavigationButton(kActionForward, vector_icons::kArrowForwardIcon,
++                      IDS_TOOLTIP_FORWARD);
++  AddNavigationButton(kActionReload, vector_icons::kRefreshIcon,
++                      IDS_TOOLTIP_RELOAD);
+ 
+   auto new_tab_button = std::make_unique<shared::NewTabButton>(
+       browser_,
+@@ -39,6 +60,11 @@
+   new_tab_button_pressed_subscription_ =
+       new_tab_button->RegisterWillInvokeActionCallback(
+           record_new_tab_button_pressed);
++
++  // Archie: ask what to open instead of opening a blank tab.
++  new_tab_button->SetClickOverride(
++      base::BindRepeating(&VerticalTabStripBottomContainer::ShowCommandBar,
++                          base::Unretained(this)));
+ 
+   new_tab_button_ = AddChildView(std::move(new_tab_button));
+ 
+@@ -86,6 +112,35 @@
+   expand_on_hover_lock_.reset();
+ }
+ 
++void VerticalTabStripBottomContainer::AddNavigationButton(
++    actions::ActionId action_id,
++    const gfx::VectorIcon& icon,
++    int tooltip_id) {
++  actions::ActionItem* action_item =
++      actions::ActionManager::Get().FindAction(action_id, root_action_item_);
++  CHECK(action_item);
++  // These actions are registered without an icon or tooltip because the
++  // toolbar's buttons set their own; give them what a sidebar button needs.
++  const std::u16string tooltip = l10n_util::GetStringUTF16(tooltip_id);
++  action_item->SetImage(ui::ImageModel::FromVectorIcon(icon, ui::kColorIcon));
++  action_item->SetTooltipText(tooltip);
++  action_item->SetAccessibleName(tooltip);
++
++  auto button = std::make_unique<TopContainerButton>();
++  action_view_controller_->CreateActionViewRelationship(
++      button.get(), action_item->GetAsWeakPtr());
++  AddChildView(std::move(button));
++}
++
++void VerticalTabStripBottomContainer::ShowCommandBar() {
++  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
++  CHECK(browser_view);
++  if (!command_bar_) {
++    command_bar_ = std::make_unique<ArchieCommandBar>(browser_);
++  }
++  command_bar_->Show(browser_view->contents_container());
++}
++
+ void VerticalTabStripBottomContainer::UpdateButtonStyles(bool collapsed) {
+   auto orientation = collapsed ? views::LayoutOrientation::kVertical
+                                : views::LayoutOrientation::kHorizontal;
+@@ -93,7 +148,7 @@
+   // Setting button's layout based on collapsed state
+   SetOrientation(orientation);
+   SetCrossAxisAlignment(collapsed ? views::LayoutAlignment::kStretch
+-                                  : views::LayoutAlignment::kStart);
++                                  : views::LayoutAlignment::kCenter);
+ 
+   new_tab_button_->SetProperty(
+       views::kFlexBehaviorKey,

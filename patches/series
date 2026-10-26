@@ -3,6 +3,7 @@
 # Tabs live in an Arc-style sidebar on the left.
 archie/ui/vertical-tabs-by-default.patch
 archie/ui/sidebar-full-titles-and-close-buttons.patch
+archie/ui/sidebar-bottom-bar-and-search-modal.patch
 archie/ui/no-profile-picker-on-startup.patch
 
 # No login, ever required.

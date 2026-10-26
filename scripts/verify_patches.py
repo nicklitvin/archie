@@ -52,8 +52,13 @@ def main(argv):
   work.mkdir(parents=True, exist_ok=True)
 
   patches = list(series())
-  files = sorted({m for p in patches
-                  for m in re.findall(r'^\+\+\+ b/(\S+)', p.read_text(), re.M)})
+  # Files a patch creates (--- /dev/null) don't exist upstream yet.
+  touched = {m for p in patches
+             for m in re.findall(r'^\+\+\+ b/(\S+)', p.read_text(), re.M)}
+  created = {m for p in patches
+             for m in re.findall(r'^--- /dev/null\n\+\+\+ b/(\S+)',
+                                 p.read_text(), re.M)}
+  files = sorted(touched - created)
   print('Chromium %s: fetching %d files' % (version, len(files)))
   for path in files:
     fetch(version, path, work / path)
