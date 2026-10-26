@@ -108,7 +108,7 @@ diff --git a/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc b/chrom
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/vertical/archie_command_bar.cc
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,299 @@
 +// Copyright 2026 The Archie Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -146,6 +146,7 @@ new file mode 100644
 +#include "ui/gfx/font_list.h"
 +#include "ui/gfx/geometry/insets.h"
 +#include "ui/gfx/text_constants.h"
++#include "ui/gfx/vector_icon_types.h"
 +#include "ui/views/accessibility/view_accessibility.h"
 +#include "ui/views/background.h"
 +#include "ui/views/border.h"
@@ -309,12 +310,12 @@ new file mode 100644
 +        base::BindRepeating(&ArchieCommandBar::OnRowPressed,
 +                            weak_factory_.GetWeakPtr(), i),
 +        text);
++    const gfx::VectorIcon& icon = AutocompleteMatch::IsSearchType(match.type)
++                                      ? vector_icons::kLucideSearchIcon
++                                      : vector_icons::kLucideGlobeIcon;
 +    row->SetImageModel(
 +        views::Button::STATE_NORMAL,
-+        ui::ImageModel::FromVectorIcon(AutocompleteMatch::IsSearchType(match.type)
-+                                           ? vector_icons::kSearchIcon
-+                                           : vector_icons::kGlobeIcon,
-+                                       ui::kColorIcon, kRowIconSize));
++        ui::ImageModel::FromVectorIcon(icon, ui::kColorIcon, kRowIconSize));
 +    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 +    row->SetElideBehavior(gfx::ELIDE_TAIL);
 +    row->SetTooltipText(text);
@@ -340,8 +341,8 @@ new file mode 100644
 +  }
 +  selected_row_ = row;
 +  suggestion_rows_[selected_row_]->SetBackground(
-+      views::CreateRoundedRectBackground(kColorTabBackgroundInactiveHoverFrameActive,
-+                                         kRowCornerRadius));
++      views::CreateRoundedRectBackground(
++          kColorTabBackgroundInactiveHoverFrameActive, kRowCornerRadius));
 +}
 +
 +void ArchieCommandBar::OnRowPressed(size_t row) {
@@ -625,7 +626,7 @@ new file mode 100644
  #endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_BOTTOM_CONTAINER_H_
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
-@@ -4,26 +4,117 @@
+@@ -4,26 +4,125 @@
  
  #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
  
@@ -726,7 +727,7 @@ new file mode 100644
 +      base::BindRepeating(&VerticalTabStripBottomContainer::ScrollToActiveTab,
 +                          base::Unretained(this)));
 +  scroll_button->UpdateIcon(ui::ImageModel::FromVectorIcon(
-+      vector_icons::kLocationOnIcon, ui::kColorIcon));
++      vector_icons::kLucideMapPinIcon, ui::kColorIcon));
 +  scroll_button->SetTooltipText(kScrollToActiveTabTooltip);
 +  scroll_button->GetViewAccessibility().SetName(
 +      std::u16string(kScrollToActiveTabTooltip));
@@ -735,16 +736,24 @@ new file mode 100644
 +  // Row 2: Back, Forward, Reload and the new tab button.
 +  button_row_ = AddChildView(std::make_unique<views::FlexLayoutView>());
 +
-+  AddNavigationButton(kActionBack, vector_icons::kArrowBackIcon,
++  AddNavigationButton(kActionBack, vector_icons::kLucideArrowLeftIcon,
 +                      IDS_TOOLTIP_BACK);
-+  AddNavigationButton(kActionForward, vector_icons::kArrowForwardIcon,
++  AddNavigationButton(kActionForward, vector_icons::kLucideArrowRightIcon,
 +                      IDS_TOOLTIP_FORWARD);
-+  AddNavigationButton(kActionReload, vector_icons::kRefreshIcon,
++  AddNavigationButton(kActionReload, vector_icons::kLucideRotateCwIcon,
 +                      IDS_TOOLTIP_RELOAD);
++
++  // Archie's sidebar uses Lucide icons (https://lucide.dev).
++  actions::ActionItem* new_tab_action =
++      actions::ActionManager::Get().FindAction(kActionNewTab,
++                                               root_action_item_);
++  CHECK(new_tab_action);
++  new_tab_action->SetImage(ui::ImageModel::FromVectorIcon(
++      vector_icons::kLucidePlusIcon, ui::kColorIcon));
  
    auto new_tab_button = std::make_unique<shared::NewTabButton>(
        browser_,
-@@ -40,28 +131,40 @@
+@@ -40,28 +139,40 @@
        new_tab_button->RegisterWillInvokeActionCallback(
            record_new_tab_button_pressed);
  
@@ -793,7 +802,7 @@ new file mode 100644
      }
    }
    return true;
-@@ -72,6 +175,28 @@
+@@ -72,6 +183,28 @@
    // Updating the styles immediately at start of the animation by including
    // collapsing state.
    UpdateButtonStyles(state != tabs::VerticalTabStripCollapseState::kExpanded);
@@ -822,7 +831,7 @@ new file mode 100644
  }
  
  void VerticalTabStripBottomContainer::OnNewTabButtonContextMenuWillShow() {
-@@ -90,10 +215,14 @@
+@@ -90,10 +223,14 @@
    auto orientation = collapsed ? views::LayoutOrientation::kVertical
                                 : views::LayoutOrientation::kHorizontal;
  
@@ -840,7 +849,7 @@ new file mode 100644
  
    new_tab_button_->SetProperty(
        views::kFlexBehaviorKey,
-@@ -108,5 +237,92 @@
+@@ -108,5 +245,92 @@
                  : LayoutInset::VERTICAL_TAB_STRIP_BOTTOM_BUTTON_UNCOLLAPSED));
  }
  
@@ -927,7 +936,7 @@ new file mode 100644
 +      views::Button::STATE_NORMAL,
 +      favicon_driver && favicon_driver->FaviconIsValid()
 +          ? ui::ImageModel::FromImage(favicon_driver->GetFavicon())
-+          : ui::ImageModel::FromVectorIcon(vector_icons::kGlobeIcon,
++          : ui::ImageModel::FromVectorIcon(vector_icons::kLucideGlobeIcon,
 +                                           ui::kColorIcon, kPillIconSize));
 +}
 +

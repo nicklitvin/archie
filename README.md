@@ -38,6 +38,8 @@ scripts/build.sh        gn gen + autoninja
 scripts/package.sh      Linux tarball with launcher and .desktop file
 scripts/preview.sh      try Archie's defaults on a Chrome you already have
 scripts/verify_patches.py  check patches apply to upstream without a checkout
+scripts/lucide_to_icon.py  convert Lucide SVGs into Chromium .icon files
+icons/lucide/           Lucide SVG sources used by Archie
 ```
 
 ## Try it in 10 seconds (no build)
@@ -83,6 +85,25 @@ on Linux so far.
    patches touch and reports any patch that no longer applies. CI runs this
    check on every push and once a week.
 3. Fix any failing patches, then run `scripts/fetch.sh && scripts/prepare.sh --reset && scripts/build.sh`.
+
+## Icons
+
+Archie's sidebar uses [Lucide](https://lucide.dev) icons (ISC license, see
+`icons/lucide/LICENSE`): Back, Forward, Reload, New tab, the "scroll to
+current tab" pin, the search box's suggestion icons, and the ✕ on tabs.
+
+![Archie's Lucide icons](docs/icons.png)
+
+Chromium draws icons from its own `.icon` vector format, not SVG.
+`scripts/lucide_to_icon.py` (needs `pip install picosvg`) turns a Lucide SVG
+into a `.icon` file. It converts the rounded strokes into filled shapes, so
+the icon looks exactly like Lucide at any size. To add or swap an icon:
+
+1. Copy the SVG from Lucide into `icons/lucide/`.
+2. Run `python3 scripts/lucide_to_icon.py <out_dir> icons/lucide/*.svg`.
+3. Put the output in `patches/archie/ui/lucide-icons.patch`, list it in
+   `components/vector_icons/BUILD.gn`, and use it in C++ as
+   `vector_icons::kLucide<Name>Icon`.
 
 ## Writing a patch
 
