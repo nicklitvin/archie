@@ -6,7 +6,7 @@ source "$(dirname "$0")/common.sh"
 out="$SRC/$OUT_DIR"
 [[ -x "$out/chrome" ]] || die "No build at $out. Run scripts/build.sh first."
 
-name="archie-$CHROMIUM_VERSION-linux-x64"
+name="archie-$ARCHIE_VERSION-linux-x64"
 stage="$ARCHIE_ROOT/dist/$name"
 rm -rf "$stage" && mkdir -p "$stage"
 

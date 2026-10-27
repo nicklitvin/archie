@@ -3,6 +3,10 @@ set -euo pipefail
 
 ARCHIE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHROMIUM_VERSION="$(tr -d '[:space:]' < "$ARCHIE_ROOT/CHROMIUM_VERSION")"
+ARCHIE_VERSION="$(tr -d '[:space:]' < "$ARCHIE_ROOT/ARCHIE_VERSION")"
+
+# GitHub repository whose releases Archie checks for updates and patch notes.
+ARCHIE_UPDATE_REPO="${ARCHIE_UPDATE_REPO:-nicklitvin/archie}"
 
 # Where the Chromium checkout lives (~100 GB). Override to put it elsewhere.
 CHROMIUM_DIR="${CHROMIUM_DIR:-$ARCHIE_ROOT/build/chromium}"
