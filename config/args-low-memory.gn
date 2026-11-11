@@ -1,0 +1,13 @@
+# Overrides for computers with about 8 GB of RAM to spare. Used by default on
+# Windows, and on Linux with ARCHIE_LOW_MEMORY=1. Combine with fewer parallel
+# jobs (ARCHIE_JOBS, default 4).
+
+# Official builds turn on ThinLTO, whose final link alone can need 16+ GB.
+is_official_build = false
+use_thin_lto = false
+
+# One big chrome.dll / chrome binary, no debug symbols: smaller, faster links.
+is_component_build = false
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0

@@ -13,12 +13,14 @@ notes="${1:-}"
 [[ -n "$notes" && -f "$notes" ]] || die "Usage: scripts/release.sh NOTES.md"
 command -v gh >/dev/null || die "Install the GitHub CLI (gh) first."
 
-tarball="$ARCHIE_ROOT/dist/archie-$ARCHIE_VERSION-linux-x64.tar.xz"
-[[ -f "$tarball" ]] || die "No $tarball. Run scripts/package.sh first."
+# Every package built for this version: the Linux tarball and/or the Windows installer.
+shopt -s nullglob
+assets=("$ARCHIE_ROOT"/dist/archie-"$ARCHIE_VERSION"-*.{tar.xz,exe})
+(( ${#assets[@]} )) || die "No packages for $ARCHIE_VERSION in dist/. Run the package script first."
 
 tag="v$ARCHIE_VERSION"
-log "Publishing Archie $ARCHIE_VERSION as $tag on $ARCHIE_UPDATE_REPO"
-gh release create "$tag" "$tarball" \
+log "Publishing Archie $ARCHIE_VERSION as $tag on $ARCHIE_UPDATE_REPO with ${#assets[@]} file(s)"
+gh release create "$tag" "${assets[@]}" \
   --repo "$ARCHIE_UPDATE_REPO" \
   --title "Archie $ARCHIE_VERSION" \
   --notes-file "$notes"

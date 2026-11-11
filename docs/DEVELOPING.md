@@ -19,6 +19,9 @@ scripts/prepare.sh      apply patches, branding and string rebrand
 scripts/rebrand.py      "Chromium" -> "Archie" in UI strings, keeps translations
 scripts/build.sh        gn gen + autoninja
 scripts/package.sh      Linux tarball with launcher and .desktop file
+scripts/windows/        the same steps for Windows (.bat, low memory by default)
+scripts/make_args.py    writes args.gn, with config/args-low-memory.gn merged in
+scripts/write_version_header.py  bakes ARCHIE_VERSION into the build
 scripts/release.sh      publish the tarball as a GitHub release (with patch notes)
 scripts/preview.sh      try Archie's defaults on a Chrome you already have
 scripts/verify_patches.py  check patches apply to upstream without a checkout
@@ -40,7 +43,7 @@ This is only a preview of the defaults. A real Archie build also removes
 popups that need a source change, and has the sidebar changes (full titles,
 ✕ on every tab, the bottom section and the search box).
 
-## Build
+## Building on Linux
 
 You need Linux (x64), about 100 GB of free disk, 16 GB+ of RAM, and a few
 hours for the first build. See Chromium's
@@ -61,16 +64,79 @@ discards local changes in the checkout and starts again from a clean tree.
 macOS and Windows builds use the same patches. The scripts are only tested
 on Linux so far.
 
+## Building on Windows
+
+The Windows scripts live in `scripts\windows\`. Run them from **Command
+Prompt** (`cmd.exe`), not PowerShell: Chromium's tools don't set themselves up
+correctly from PowerShell the first time.
+
+### What you need
+
+- Windows 10 or 11 (x64), and an NTFS drive with **about 100 GB free**.
+- **Visual Studio 2026** (the free Community edition is fine) with the
+  **Desktop development with C++** workload and **MFC/ATL support**.
+- **Windows 11 SDK 10.0.28000.2270** with **Debugging Tools for Windows**
+  (tick it in the Visual Studio Installer, or add it later under Programs and
+  Features > Windows Software Development Kit > Change).
+- [Git for Windows](https://git-scm.com/download/win).
+- For publishing: the [GitHub CLI](https://cli.github.com), logged in.
+
+### Low memory by default
+
+The Windows scripts assume about **8 GB of RAM to spare**, so a 16 GB computer
+stays usable while it builds:
+
+- 4 parallel compile jobs (`set ARCHIE_JOBS=2` for even less, `8` for more).
+- No link-time optimization, which alone can need 16+ GB
+  (see `config/args-low-memory.gn`). Archie runs a little slower than an
+  official Chrome build, which is not noticeable day to day.
+
+Let Windows manage the page file (System > About > Advanced system settings >
+Performance > Advanced > Virtual memory > "Automatically manage"), so a
+memory spike slows the build down instead of crashing it.
+
+### Build
+
+```bat
+git clone https://github.com/nicklitvin/archie
+cd archie
+rem Chromium source into C:\archie-build (an hour or more)
+scripts\windows\fetch.bat
+rem Apply Archie's patches
+scripts\windows\prepare.bat
+rem Compile. The first build can take most of a day.
+scripts\windows\build.bat
+rem Makes dist\archie-<version>-windows-x64-setup.exe
+scripts\windows\package.bat
+rem Publish it as a GitHub release
+scripts\windows\release.bat notes.md
+```
+
+The installer puts Archie in `%LOCALAPPDATA%\Archie` for the current user, with
+its own profile, separate from any other Chromium or Chrome.
+
+You can stop `build.bat` (Ctrl+C) and run it again later; it carries on where it
+stopped. Set `CHROMIUM_DIR` before running the scripts to put the checkout
+somewhere other than `C:\archie-build` (the path must not contain spaces).
+
+### Let Claude do it
+
+Open the `archie` folder in Claude Code on your computer and ask it to "build
+Archie on Windows". It runs the scripts above, and because this is the first
+real compile of the patches, it can fix any compile errors as they come up.
+
 ## Releasing
 
 Running copies of Archie compare their version (`ARCHIE_VERSION`) with the
 newest release on GitHub. They show your release notes in **Patch notes**.
 
 1. Bump `ARCHIE_VERSION` (e.g. `0.1.0` → `0.2.0`).
-2. Run `scripts/prepare.sh && scripts/build.sh && scripts/package.sh`.
+2. Build and package: `scripts/prepare.sh && scripts/build.sh && scripts/package.sh`
+   on Linux, or the `scripts\windows\` scripts on Windows.
 3. Write the patch notes in a Markdown file, then run
-   `scripts/release.sh notes.md`. This creates the release `v0.2.0` with the
-   tarball attached (needs the GitHub CLI, `gh`).
+   `scripts/release.sh notes.md` (or `scripts\windows\release.bat notes.md`).
+   This creates the release `v0.2.0` with every package in `dist/` attached
+   (needs the GitHub CLI, `gh`).
 
 Release tags must look like `v1.2.3`. Drafts and pre-releases are ignored.
 To check a different repository (for example a fork), set

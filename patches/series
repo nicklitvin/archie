@@ -19,3 +19,4 @@ archie/no-popups/default-switches.patch
 
 # Branding.
 archie/branding/user-data-dir.patch
+archie/branding/windows-install-mode.patch
